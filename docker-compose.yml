@@ -1,0 +1,70 @@
+#version: "2.10.2" # 2.4 is the last version that supports depends_on conditions for service health
+networks:
+  cassandra:
+services:
+  cass1:
+    image: cassandra:4.0.6
+    container_name: cass_node1
+    hostname: cass_node1
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    networks:
+      - cassandra
+    ports:
+      - "9042:9042"
+    volumes:
+      - ./config/data/cass1:/var/lib/cassandra
+      - ./config/etc/cass1:/etc/cassandra
+    environment:
+      &environment
+      CASSANDRA_SEEDS: "cass1,cass2"
+      CASSANDRA_CLUSTER_NAME: EcommerceCluster
+      CASSANDRA_DC: MyLocal
+      CASSANDRA_RACK: Unique
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_NUM_TOKENS: 128
+      HEAP_NEWSIZE: 300M
+      MAX_HEAP_SIZE: 1G
+  cass2:
+    image: cassandra:4.0.6
+    container_name: cass_node2
+    hostname: cass_node2
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    networks:
+      - cassandra
+    ports:
+      - "9043:9042"
+    volumes:
+      - ./config/data/cass2:/var/lib/cassandra
+      - ./config/etc/cass2:/etc/cassandra
+    environment: *environment
+    depends_on:
+      cass1:
+        condition: service_healthy
+  cass3:
+    image: cassandra:4.0.6
+    container_name: cass_node3
+    hostname: cass_node3
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    networks:
+      - cassandra
+    ports:
+      - "9044:9042"
+    volumes:
+      - ./config/data/cass3:/var/lib/cassandra
+      - ./config/etc/cass3:/etc/cassandra
+    environment: *environment
+    depends_on:
+      cass2:
+        condition: service_healthy
