@@ -120,7 +120,7 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
     case SaveSnapshotFailure(metadata, reason) =>
       log.debug(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
       operationsCount = SNAPSHOT_CATEGORIES_MANAGER_BULK_SIZE
-    case x => log.info(s"Unhandled $x")
+    case x => log.debug(s"Unhandled $x")
   }
 
   def isSnapshotTime(size:Int = SNAPSHOT_CATEGORIES_MANAGER_SIZE): Unit = {
