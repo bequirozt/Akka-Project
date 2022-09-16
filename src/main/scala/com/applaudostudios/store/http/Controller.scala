@@ -113,7 +113,7 @@ case class Controller(catManager:ActorRef,itemsManager:ActorRef,usersManager:Act
             }
           } ~
           delete {
-            onSuccess(catManager ? RemoveCategory(BigInt(id))) {
+            onSuccess(catManager ? RemoveCategory(BigInt(id),itemsManager)) {
               case cat: Category => complete(StatusCodes.OK, cat)
               case msg: String => complete(StatusCodes.NotFound, msg)
             }

@@ -12,10 +12,13 @@ object ItemActor {
   case class LoadItem(item:Item)
   case class UpdateItem(item:Item)
   case class AssociateCategory(catId:BigInt)
+  case class DeleteCategory(id:BigInt)
+
   //Event
   case class ItemUpdated(item:Item)
+  case class CategoryDeleted(id:BigInt)
 
-  case class ItemState(id:Int, var brand:String="",var categoryId:BigInt=BigInt("0"),var price:Double = 0.0)
+  case class ItemState(id:Int, var brand:String="",var categoryId:BigInt=BigInt("0"),var price:Double = 0.0, var prevCategory:BigInt =BigInt("0"))
 }
 
 case class ItemActor(id:Int, manager:ActorRef) extends PersistentActor with ActorLogging {
@@ -48,6 +51,11 @@ case class ItemActor(id:Int, manager:ActorRef) extends PersistentActor with Acto
         loadInfo(item)
         sender() ! item
       }
+    case DeleteCategory(catId) if state.categoryId==catId =>
+      persist(CategoryDeleted(catId)) { _ =>
+        state.prevCategory = state.categoryId
+        state.categoryId = 0
+      }
     case StopActor =>
       sender() ! Item(state.id,state.brand,state.categoryId,state.price)
       context.stop(self)
@@ -58,6 +66,9 @@ case class ItemActor(id:Int, manager:ActorRef) extends PersistentActor with Acto
       loadInfo(item)
     case ItemUpdated(item) =>
       loadInfo(item)
+    case CategoryDeleted(id) =>
+      state.prevCategory = id
+      state.categoryId = 0
     case RecoveryCompleted =>
       log.debug("Recovery completed")
   }

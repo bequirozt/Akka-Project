@@ -8,6 +8,7 @@ import akka.actor.{ActorContext, ActorLogging, ActorRef, Props}
 import akka.persistence.{PersistentActor, RecoveryCompleted, SaveSnapshotFailure, SaveSnapshotSuccess, SnapshotOffer}
 import com.applaudostudios.store.domain.categories.CategoryActor.LoadCategory
 import com.applaudostudios.store.domain.data.Category
+import com.applaudostudios.store.domain.items.ItemsManager.CategoryRemoved
 import com.applaudostudios.store.domain.manager.EcommerceManager.{FinishBulkPersistence, InitBulkPersistence}
 
 import scala.collection.mutable
@@ -20,7 +21,7 @@ object CategoriesManager{
   case class GetCategory(id:BigInt)
   case class CreateCategory(category:Category)
   case class UpdateCategory(category: Category)
-  case class RemoveCategory(id:BigInt)
+  case class RemoveCategory(id:BigInt, replyTo:ActorRef)
 
   //Events
   case class CategoryCreated(category:Category)
@@ -65,15 +66,16 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
     case GetCategory(id) if state.categories.contains(id) && !state.disabledCategories.contains(id)=>
       state.categories(id) forward RetrieveInfo
 
-    case RemoveCategory(id) if state.disabledCategories.contains(id) =>
+    case RemoveCategory(id, _) if state.disabledCategories.contains(id) =>
       sender() ! s"Category already deleted"
-    case RemoveCategory(id) if state.categories.contains(id) =>
+    case RemoveCategory(id, itemsManager) if state.categories.contains(id) =>
       persist(CategoryDisabled(id)) { _ =>
         state.disabledCategories.addOne(id)
         isSnapshotTime()
+        itemsManager ! CategoryRemoved(id)
         state.categories(id) forward RetrieveInfo
       }
-    case GetCategory(_) | UpdateCategory(_) | RemoveCategory(_) =>
+    case GetCategory(_) | UpdateCategory(_) | RemoveCategory(_,_) =>
       sender() ! s"Category not found" //Todo failure NF
     case CreateCategory(_) =>
       sender() ! "Category already registered" //TODO Failure Bad Req

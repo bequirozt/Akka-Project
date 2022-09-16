@@ -7,7 +7,7 @@ import akka.persistence.{PersistentActor, RecoveryCompleted, SaveSnapshotFailure
 import com.applaudostudios.store.domain.categories.CategoriesManager.GetCategory
 import com.applaudostudios.store.domain.data.{Category, Item}
 import com.applaudostudios.store.domain.manager.EcommerceManager.{FinishBulkPersistence, InitBulkPersistence}
-import com.applaudostudios.store.domain.items.ItemActor.{AssociateCategory, LoadItem, UpdateItem}
+import com.applaudostudios.store.domain.items.ItemActor.{AssociateCategory, DeleteCategory, LoadItem, UpdateItem}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable
@@ -57,7 +57,6 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
       sender() ! Future.sequence(state.items.values.map(_ ? RetrieveInfo))
     case GetItem(id) if state.items.contains(id) && !state.disabledItems.contains(id)=>
       state.items(id).forward(RetrieveInfo)
-
     case CreateItem(Item(id,_,_,_)) if state.items.contains(id) =>
       sender() ! s"Item already registered"  //Todo: Generate Appropriate Failure BadRequest
     case CreateItem(item @ Item(id,_,cat,_)) if cat==0 =>
@@ -92,7 +91,10 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
         state.items(id) forward UpdateItem(item)
       else
         sender() ! s"Item failed to update. The category associated with it is not registered" //todo: Failure bad request
-
+    case CategoryRemoved(id) =>
+      state.items.values.map { actor =>
+        actor ! DeleteCategory(id)
+      }
     case RemoveItem(id) if state.disabledItems.contains(id) =>
       sender() ! s"Item already deleted"
     case RemoveItem(id) if state.items.contains(id) =>
