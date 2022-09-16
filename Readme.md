@@ -35,3 +35,45 @@
 
   The controller actor containing all the routing directives that asks the managers about the requested resources
  
+#### Endpoints
+```
+/ecommerce
+
+    /item
+    GET / - List of all items
+    POST / - Add item - required : Int id, String brand, String price, BigInt categoryId (optional)
+    GET /{id} - View item
+    PUT /{id} - Update item
+    DELETE /{id} - Delete item
+    
+      /{id}/category
+      PUT ?categoryId - Associates an existing Category to the given item  **
+    
+    /category
+    GET / - List of all categories
+    POST / - Add Category - required: id: BigInt, code:String
+    GET /{id} - View Category
+    PUT /{id} - Update Category
+    DELETE /{id} - Delete Category
+    
+    /user
+    GET / - List of all users
+    POST / - Add user
+    GET /{id} - View user info
+    PUT /{id} - Update user
+    DELETE /{id} - Delete user
+      
+      /{id}/purchase
+      GET - List all purchases for a given user
+      POST ?itemId - Stores a new purchase event
+       
+      /{id}/view
+      GET - List all views for a given user
+      POST ?itemId - Stores a new view event
+       
+      /{id}/cart
+      GET - List all items in the cart for a given user
+      POST - Purchases all the items in the cart
+      POST ?itemId - Stores a new item in the cart
+    
+```

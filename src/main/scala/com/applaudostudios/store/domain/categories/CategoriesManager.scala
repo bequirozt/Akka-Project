@@ -24,15 +24,19 @@ object CategoriesManager{
 
   //Events
   case class CategoryCreated(category:Category)
-
+  case class CategoryDisabled(id:BigInt)
   //State
-  case class CategoriesManagerState(categories: mutable.Map[BigInt, ActorRef]= mutable.HashMap[BigInt,ActorRef]()){
-    def turnIntoSnapshot: SnapshotContent = SnapshotContent(categories.keys.toList )
+  case class CategoriesManagerState(categories: mutable.Map[BigInt, ActorRef]= mutable.HashMap[BigInt,ActorRef](),
+                                    disabledCategories:mutable.Set[BigInt] = mutable.HashSet[BigInt]()
+                                   ){
+    def turnIntoSnapshot: SnapshotContent = SnapshotContent(categories.keys.toList, disabledCategories )
   }
-  case class SnapshotContent(categories: List[BigInt]) {
+  case class SnapshotContent(categories: List[BigInt], disabledCategories:mutable.Set[BigInt]) {
     def turnIntoState(implicit context: ActorContext, store: ActorRef): CategoriesManagerState =
       CategoriesManagerState(
-        categories.map(id => id -> context.actorOf(CategoryActor.props(id, store), s"CategoryActor-$id")).to(mutable.HashMap))
+        categories.map(id => id -> context.actorOf(CategoryActor.props(id, store), s"CategoryActor-$id")).to(mutable.HashMap),
+        disabledCategories
+      )
   }
 
 }
@@ -56,11 +60,20 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
         state.categories.addOne(cat.id -> catActor)
         isSnapshotTime()
       }
-    case UpdateCategory(cat) if state.categories.contains(cat.id)  =>
+    case UpdateCategory(cat) if state.categories.contains(cat.id) && !state.disabledCategories.contains(cat.id)  =>
       state.categories(cat.id) forward UpdateCategory(cat)
-    case GetCategory(id) if state.categories.contains(id) =>
+    case GetCategory(id) if state.categories.contains(id) && !state.disabledCategories.contains(id)=>
       state.categories(id) forward RetrieveInfo
-    case GetCategory(_) | UpdateCategory(_) =>
+
+    case RemoveCategory(id) if state.disabledCategories.contains(id) =>
+      sender() ! s"Category already deleted"
+    case RemoveCategory(id) if state.categories.contains(id) =>
+      persist(CategoryDisabled(id)) { _ =>
+        state.disabledCategories.addOne(id)
+        isSnapshotTime()
+        state.categories(id) forward RetrieveInfo
+      }
+    case GetCategory(_) | UpdateCategory(_) | RemoveCategory(_) =>
       sender() ! s"Category not found" //Todo failure NF
     case CreateCategory(_) =>
       sender() ! "Category already registered" //TODO Failure Bad Req
@@ -77,6 +90,9 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
       val catActor = context.actorOf(CategoryActor.props(cat.id,self), s"CategoryActor-${cat.id}")
       state.categories.addOne(cat.id -> catActor)
       operationsCount +=1
+    case CategoryDisabled(id) =>
+      state.disabledCategories.addOne(id)
+      operationsCount+=1
     case SnapshotOffer(metadata, contents:SnapshotContent) =>
       log.info(s"Recovered Snapshot for Actor: ${metadata.persistenceId} - ${metadata.timestamp}")
       state = contents.turnIntoState

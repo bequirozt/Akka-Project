@@ -41,7 +41,7 @@ case class Controller(catManager:ActorRef,itemsManager:ActorRef,usersManager:Act
               onSuccess(itemsManager ? CreateItem(item)) {
                 case item: Item =>
                   complete(StatusCodes.OK, item)
-                case _ => complete(StatusCodes.BadRequest) //Todo: Failure (Cat NotFound)
+                case msg:String => complete(StatusCodes.BadRequest, msg) //Todo: Failure (Cat NotFound)
               }
             }
           }~
@@ -67,6 +67,12 @@ case class Controller(catManager:ActorRef,itemsManager:ActorRef,usersManager:Act
             onSuccess(itemsManager ? GetItem(id.toInt)) {
               case item: Item => complete(StatusCodes.OK, item)
               case failure: String => complete(StatusCodes.NotFound, failure) //Todo: Failure (Item NotFound)
+            }
+          } ~
+          delete {
+            onSuccess(itemsManager ? RemoveItem(id.toInt)) {
+              case item: Item => complete(StatusCodes.OK, item)
+              case msg: String => complete(StatusCodes.NotFound, msg)
             }
           }
         }
@@ -104,6 +110,12 @@ case class Controller(catManager:ActorRef,itemsManager:ActorRef,usersManager:Act
             onSuccess(catManager ? GetCategory(BigInt(id))) {
               case cat: Category => complete(StatusCodes.OK, cat)
               case failure: String => complete(StatusCodes.NotFound, failure) //Todo: Failure (Cat NotFound)
+            }
+          } ~
+          delete {
+            onSuccess(catManager ? RemoveCategory(BigInt(id))) {
+              case cat: Category => complete(StatusCodes.OK, cat)
+              case msg: String => complete(StatusCodes.NotFound, msg)
             }
           }
         }
@@ -145,8 +157,8 @@ case class Controller(catManager:ActorRef,itemsManager:ActorRef,usersManager:Act
           } ~
           delete {
             onSuccess(usersManager ? RemoveUser(id.toLong)) {
-              case user: User => complete(StatusCodes.OK, user)
-              case _ => complete(StatusCodes.NotFound)
+              case user: UserOverview => complete(StatusCodes.OK, user)
+              case msg: String => complete(StatusCodes.NotFound, msg)
             }
           }
         }~

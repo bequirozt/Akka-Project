@@ -7,7 +7,7 @@ import akka.persistence.{PersistentActor, RecoveryCompleted, SaveSnapshotFailure
 import com.applaudostudios.store.domain.categories.CategoriesManager.GetCategory
 import com.applaudostudios.store.domain.data.{Category, Item}
 import com.applaudostudios.store.domain.manager.EcommerceManager.{FinishBulkPersistence, InitBulkPersistence}
-import com.applaudostudios.store.domain.items.ItemActor.{LoadItem, UpdateItem}
+import com.applaudostudios.store.domain.items.ItemActor.{AssociateCategory, LoadItem, UpdateItem}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable
@@ -19,21 +19,24 @@ object ItemsManager {
   case object GetItems
   case class GetItem(id:Int)
   case class CreateItem(item:Item)
-
+  case class AddCategory(itemId:Int, catId:BigInt)
   case class RemoveItem(id:Int)
+  case class CategoryRemoved(id:BigInt)
 
   //Events
   case class ItemCreated(item: Item)
+  case class ItemDisabled(id:Int)
 
-
-  case class ItemsManagerState(items: mutable.Map[Int, ActorRef] = mutable.HashMap[Int, ActorRef]()){
-    def turnIntoSnapshot: SnapshotContent = SnapshotContent(items.keys.toList)
+  case class ItemsManagerState(items: mutable.Map[Int, ActorRef] = mutable.HashMap[Int, ActorRef](),
+                               disabledItems:mutable.Set[Int] = mutable.HashSet[Int]() ){
+    def turnIntoSnapshot: SnapshotContent = SnapshotContent(items.keys.toList, disabledItems)
   }
 
-  case class SnapshotContent(items:List[Int]) {
+  case class SnapshotContent(items:List[Int], deletedItems:mutable.Set[Int]) {
     def turnIntoState(implicit context: ActorContext, store: ActorRef): ItemsManagerState =
       ItemsManagerState(
-        items.map(id =>  id->context.actorOf(ItemActor.props(id, store), s"ItemActor-$id")).to(mutable.HashMap)
+        items.map(id =>  id->context.actorOf(ItemActor.props(id, store), s"ItemActor-$id")).to(mutable.HashMap),
+        deletedItems
       )
   }
 }
@@ -52,7 +55,7 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
       context.become(loadBulkData)
     case GetItems =>
       sender() ! Future.sequence(state.items.values.map(_ ? RetrieveInfo))
-    case GetItem(id) if state.items.contains(id)=>
+    case GetItem(id) if state.items.contains(id) && !state.disabledItems.contains(id)=>
       state.items(id).forward(RetrieveInfo)
 
     case CreateItem(Item(id,_,_,_)) if state.items.contains(id) =>
@@ -78,10 +81,10 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
         }
       else
         sender() ! s"Item failed to create. The category associated with it is not registered" //todo: Failure bad request
-    case UpdateItem(item @ Item(id,_,catId,_)) if state.items.contains(id) && catId == 0 =>
+    case UpdateItem(item @ Item(id,_,catId,_)) if state.items.contains(id) && !state.disabledItems.contains(id) && catId == 0 =>
       state.items(id) forward UpdateItem(item)
-    case UpdateItem(item @ Item(id,_,catId,_)) if state.items.contains(id) =>
-      val category: Option[Any] = Await.result(categoryManager ? GetCategory(catId), REQUEST_TIME) match {
+    case UpdateItem(item @ Item(id,_,catId,_)) if state.items.contains(id) && !state.disabledItems.contains(id)=>
+      val category: Option[Category] = Await.result(categoryManager ? GetCategory(catId), REQUEST_TIME) match {
         case cat:Category => Some(cat)
         case _ => None
       }
@@ -89,7 +92,24 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
         state.items(id) forward UpdateItem(item)
       else
         sender() ! s"Item failed to update. The category associated with it is not registered" //todo: Failure bad request
-    case UpdateItem(_) | GetItem(_) =>
+
+    case RemoveItem(id) if state.disabledItems.contains(id) =>
+      sender() ! s"Item already deleted"
+    case RemoveItem(id) if state.items.contains(id) =>
+      persist(ItemDisabled(id)) { _ =>
+        state.disabledItems.addOne(id)
+        isSnapshotTime()
+        state.items(id) forward RetrieveInfo
+      }
+    case AddCategory(itemId, catId) if state.items.contains(itemId) && !state.disabledItems.contains(itemId) =>
+      val category:Option[Category] = Await.result(categoryManager ? GetCategory(catId), REQUEST_TIME) match {
+        case cat: Category => Some(cat)
+        case _ => None
+      }
+      if(category.isDefined)
+        state.items(itemId) forward AssociateCategory(catId)
+      else sender() ! s"The category is not defined"
+    case UpdateItem(_) | GetItem(_) | AddCategory(_,_) | RemoveItem(_) =>
       sender() ! s"Item not found" //Todo: generate Appropriate Failure NotFound
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
@@ -103,6 +123,9 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
     case ItemCreated(item) =>
       val itemActor = context.actorOf(ItemActor.props(item.id, self), s"ItemActor-${item.id}")
       state.items.addOne(item.id -> itemActor)
+      operationsCount += 1
+    case ItemDisabled(id) =>
+      state.disabledItems.addOne(id)
       operationsCount += 1
     case SnapshotOffer(metadata, contents:SnapshotContent) =>
       log.info(s"Recovered Snapshot for Actor: ${metadata.persistenceId} - ${metadata.timestamp}")

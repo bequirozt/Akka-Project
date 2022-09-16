@@ -105,35 +105,29 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
           }
         case _ => None
       }
-      if (infoToAdd.isDefined) {
-        val info = infoToAdd.get
+      val info:(Option[Item],Option[Category]) = infoToAdd.getOrElse(None,None)
+      if (info._1.isDefined) {
         val item = info._1.get
         val cat = info._2.getOrElse(Category(0, ""))
         if (eventType.equals("view")) state.users(userId) forward AddView(item, cat)
         if (eventType.equals("purchase")) state.users(userId) forward AddPurchase(item, cat)
         if (eventType.equals("cart")) state.users(userId) forward AddCart(item, cat)
+      }else {
+        sender() ! s"Item not found" //Todo Handle failure
       }
     case BuyCart(id) if state.users.contains(id) && !state.disabledUsers.contains(id)=>
       state.users(id) forward PurchaseCart
 
       // User Activation / Disabling
-    case RemoveUser(id) if !state.users.contains(id) =>
-      sender() ! s"The User is not registered" //Todo handle failure
-    case ActivateUser(id) if !state.users.contains(id) =>
-      sender() ! s"The User is not registered" //Todo handle failure
     case RemoveUser(id) if state.disabledUsers.contains(id) =>
       sender() ! s"User already deleted"
     case ActivateUser(id) if !state.disabledUsers.contains(id) =>
       sender() ! s"User already active"
-    case RemoveUser(id) =>
+    case RemoveUser(id) if state.users.contains(id) =>
       persist(UserDisabled(id)) { _ =>
         state.disabledUsers.addOne(id)
         isSnapshotTime()
-        val user: Option[User] = Await.result(state.users(id) ? RetrieveInfo , REQUEST_TIME) match {
-          case user: UserOverview => Some(user.user)
-          case _ => None
-        }
-        sender() ! user.getOrElse("User not found")
+        state.users(id) forward RetrieveInfo
       }
     case ActivateUser(id) if state.disabledUsers.contains(id) =>
       persist(UserActivated(id)) {_=>
@@ -142,7 +136,8 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
         sender() ! "User activated successfully"
       }
 
-    case GetCart(_) | GetViews(_) | GetPurchases(_) | GetUser(_) | UpdateUser(_) | BuyCart(_) |  PersistEvent(_,_,_) =>
+    case GetCart(_) | GetViews(_) | GetPurchases(_) | GetUser(_) | UpdateUser(_) |
+         BuyCart(_) |  PersistEvent(_,_,_) | RemoveUser(_) | ActivateUser(_) =>
       sender() ! s"User not Found" //Todo Failure
     case CreateUser(User(id, _, _)) if state.users.contains(id) =>
       sender() ! s"User already registered with id: $id" //Todo: Failure

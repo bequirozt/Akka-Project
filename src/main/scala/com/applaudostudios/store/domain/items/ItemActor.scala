@@ -11,7 +11,7 @@ object ItemActor {
   //Command
   case class LoadItem(item:Item)
   case class UpdateItem(item:Item)
-
+  case class AssociateCategory(catId:BigInt)
   //Event
   case class ItemUpdated(item:Item)
 
@@ -40,6 +40,12 @@ case class ItemActor(id:Int, manager:ActorRef) extends PersistentActor with Acto
     case UpdateItem(item) =>
       persist(ItemUpdated(item)) { ev =>
         loadInfo(ev.item)
+        sender() ! item
+      }
+    case AssociateCategory(catId:BigInt) =>
+      val item = Item(state.id,state.brand,catId,state.price)
+      persist(ItemUpdated(item)) {_=>
+        loadInfo(item)
         sender() ! item
       }
     case StopActor =>
