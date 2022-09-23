@@ -68,8 +68,6 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
   override def persistenceId: String = s"Users-Manager-Actor"
 
   var state:UserManagerState = UserManagerState()
-  var operationsCount:Int = 0
-
 
   override def receiveCommand: Receive = {
     case InitBulkPersistence =>
@@ -162,8 +160,7 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>
-      log.info(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
-      operationsCount = SNAPSHOT_USERS_MANAGER_SIZE
+      log.warning(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
   }
 
   override def receiveRecover: Receive = {
@@ -172,13 +169,10 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
     case UserCreated(user) =>
       val userActor = context.actorOf(UserActor.props(user.id, self), s"UserActor-${user.id}")
       state.users.addOne(user.id -> userActor)
-      operationsCount += 1
     case UserDisabled(id) =>
       state.disabledUsers.addOne(id)
-      operationsCount += 1
     case UserActivated(id) =>
       state.disabledUsers-=id
-      operationsCount+=1
     case SnapshotOffer(metadata, contents:SnapshotContent) =>
       log.info(s"Recovered Snapshot for Actor: ${metadata.persistenceId} - ${metadata.timestamp}")
       state = contents.turnIntoState
@@ -200,17 +194,14 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
     case SaveSnapshotSuccess(metadata) =>
       log.debug(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>
-      log.debug(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
-      operationsCount = SNAPSHOT_USERS_MANAGER_BULK_SIZE
+      log.warning(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
   }
 
 
   def isSnapshotTime(snapSize:Int = SNAPSHOT_USERS_MANAGER_SIZE) : Unit = {
-    if (operationsCount >= snapSize) {
+    if (lastSequenceNr % snapSize == 0 && lastSequenceNr != 0) {
       saveSnapshot(state.turnIntoSnapshot)
-      operationsCount = 0
-    } else
-      operationsCount+=1
+    }
   }
 }
 

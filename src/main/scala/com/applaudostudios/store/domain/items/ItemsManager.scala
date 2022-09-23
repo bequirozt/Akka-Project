@@ -58,7 +58,6 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
   import ItemsManager._
 
   var state: ItemsManagerState = ItemsManagerState()
-  var operationsCount: Int = 0
 
   override def persistenceId: String = "Items-Manager-Actor"
 
@@ -128,8 +127,7 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>
-      log.info(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
-      operationsCount = SNAPSHOT_ITEMS_MANAGER_SIZE
+      log.warning(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
   }
 
 
@@ -137,10 +135,8 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
     case ItemCreated(item) =>
       val itemActor = context.actorOf(ItemActor.props(item.id, self), s"ItemActor-${item.id}")
       state.items.addOne(item.id -> itemActor)
-      operationsCount += 1
     case ItemDisabled(id) =>
       state.disabledItems.addOne(id)
-      operationsCount += 1
     case SnapshotOffer(metadata, contents:SnapshotContent) =>
       log.info(s"Recovered Snapshot for Actor: ${metadata.persistenceId} - ${metadata.timestamp}")
       state = contents.turnIntoState
@@ -161,17 +157,14 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
     case SaveSnapshotSuccess(metadata) =>
       log.debug(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>
-      log.debug(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
-      operationsCount = SNAPSHOT_ITEMS_MANAGER_BULK_SIZE
+      log.warning(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
     case FinishBulkPersistence =>
       context.become(receiveCommand)
   }
 
   def isSnapshotTime(size:Int = SNAPSHOT_ITEMS_MANAGER_SIZE): Unit = {
-    if (operationsCount >= size) {
+    if (lastSequenceNr % size == 0 && lastSequenceNr != 0) {
       saveSnapshot(state.turnIntoSnapshot)
-      operationsCount = 0
-    } else
-      operationsCount += 1
+    }
   }
 }

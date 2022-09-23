@@ -38,6 +38,7 @@ object UserActor {
 
   //Response
   case class UserOverview(user: User, totalPurchases:Int= 0, totalViews:Int = 0, totalCarts: Int = 0)
+
   //State
   case class UserState(userData:User,
                        var purchases:mutable.Set[Purchase]=mutable.HashSet[Purchase](),
@@ -68,7 +69,6 @@ case class UserActor(id:Long, manager:ActorRef) extends PersistentActor with Act
   import UserActor._
   override def persistenceId: String = s"User-$id"
   var state:UserState = UserState(User(id))
-  var operationsCount: Int = 0
 
   def loadInfo(user:User):Unit = {
     val User(_,name, email ) = user
@@ -166,29 +166,22 @@ case class UserActor(id:Long, manager:ActorRef) extends PersistentActor with Act
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>
-      log.info(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
-      operationsCount = SNAPSHOT_USER_SIZE
+      log.warning(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
   }
 
   override def receiveRecover: Receive = {
     case UserCreated(user) =>
       loadInfo(user)
-      operationsCount+=1
     case UserUpdated(user) =>
       loadInfo(user)
-      operationsCount+=1
     case ViewItemAdded(view) =>
       state.views.addOne(view)
-      operationsCount+=1
     case PurchaseProductAdded(purchase) =>
       state.purchases.addOne(purchase)
-      operationsCount+=1
     case CartDeleted =>
       state.cart = mutable.HashSet[Cart]()
-      operationsCount+=1
     case CartProductAdded(cart) =>
       state.cart.addOne(cart)
-      operationsCount+=1
     case SnapshotOffer(metadata, contents: SnapshotContent) =>
       log.info(s"Recovered Snapshot for Actor: ${metadata.persistenceId} - ${metadata.timestamp}")
       state = contents.turnIntoState
@@ -199,10 +192,8 @@ case class UserActor(id:Long, manager:ActorRef) extends PersistentActor with Act
 
 
   def isSnapshotTime(snapSize: Int = SNAPSHOT_USER_SIZE): Unit = {
-    if (operationsCount >= snapSize) {
+    if (lastSequenceNr % snapSize == 0 && lastSequenceNr != 0) {
       saveSnapshot(state.turnIntoSnapshot)
-      operationsCount = 0
-    } else
-      operationsCount += 1
+    }
   }
 }

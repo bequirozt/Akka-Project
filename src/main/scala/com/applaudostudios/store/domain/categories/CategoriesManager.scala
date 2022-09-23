@@ -56,7 +56,6 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
   import CategoriesManager._
   override def persistenceId: String = "Categories-Manager-Actor"
   var state:CategoriesManagerState = CategoriesManagerState()
-  var operationsCount:Int = 0
 
   override def receiveCommand: Receive = {
     case VerifyCategory(catId, ref)  =>
@@ -94,18 +93,15 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>
-      log.info(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
-      operationsCount = SNAPSHOT_CATEGORIES_MANAGER_SIZE
+      log.warning(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
   }
 
   override def receiveRecover: Receive = {
     case CategoryCreated(cat)  =>
       val catActor = context.actorOf(CategoryActor.props(cat.id,self), s"CategoryActor-${cat.id}")
       state.categories.addOne(cat.id -> catActor)
-      operationsCount +=1
     case CategoryDisabled(id) =>
       state.disabledCategories.addOne(id)
-      operationsCount+=1
     case SnapshotOffer(metadata, contents:SnapshotContent) =>
       log.info(s"Recovered Snapshot for Actor: ${metadata.persistenceId} - ${metadata.timestamp}")
       state = contents.turnIntoState
@@ -129,17 +125,14 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
     case SaveSnapshotSuccess(metadata) =>
       log.debug(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>
-      log.debug(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
-      operationsCount = SNAPSHOT_CATEGORIES_MANAGER_BULK_SIZE
+      log.warning(s"Saving snapshot failed: ${metadata.persistenceId} - ${metadata.timestamp} because of $reason.")
     case x => log.debug(s"Unhandled $x")
   }
 
   def isSnapshotTime(size:Int = SNAPSHOT_CATEGORIES_MANAGER_SIZE): Unit = {
-    if (operationsCount >= size) {
+    if (lastSequenceNr % size == 0 && lastSequenceNr != 0) {
       saveSnapshot(state.turnIntoSnapshot)
-      operationsCount = 0
-    } else
-      operationsCount += 1
+    }
   }
 
 }
