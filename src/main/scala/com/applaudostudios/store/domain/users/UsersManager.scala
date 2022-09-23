@@ -3,7 +3,7 @@ package com.applaudostudios.store.domain.users
 import com.applaudostudios.store.domain._
 import akka.actor.{ActorContext, ActorLogging, ActorRef, Props}
 import akka.http.scaladsl.model.DateTime
-import akka.pattern.ask
+import akka.pattern.{ask, pipe}
 import akka.persistence.{PersistentActor, RecoveryCompleted, SaveSnapshotFailure, SaveSnapshotSuccess, SnapshotOffer}
 import com.applaudostudios.store.domain.categories.CategoriesManager.GetCategory
 import com.applaudostudios.store.domain.data.{Category, Item, User}
@@ -13,7 +13,8 @@ import com.applaudostudios.store.domain.users.UserActor.{AddCart, AddPurchase, A
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Future
+import scala.util.{Failure, Success}
 
 object UsersManager{
   def props(itemsManager:ActorRef, categoryManager:ActorRef):Props = Props(new UsersManager(itemsManager,categoryManager))
@@ -39,6 +40,13 @@ object UsersManager{
   case class UserCreated(user:User)
   case class UserDisabled(id:Long)
   case class UserActivated(id:Long)
+
+  //Failures
+  case class UserNotFoundException(msg: String) extends RuntimeException(msg)
+  case class UserAlreadyRegisteredException(msg: String) extends RuntimeException(msg)
+  case class UserAlreadyDeletedException(msg: String) extends RuntimeException(msg)
+
+
 
 
   case class UserManagerState(users: mutable.Map[Long, ActorRef] = mutable.HashMap[Long, ActorRef](),
@@ -88,39 +96,46 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
       state.users(id) forward RetrieveCart
     case GetPurchases(id) if state.users.contains(id) && !state.disabledUsers.contains(id)=>
       state.users(id) forward RetrievePurchases
-    case PersistEvent(userId, itemId, eventType) if state.users.contains(userId) && !state.disabledUsers.contains(userId)=>
-      val infoToAdd: Option[(Option[Item],Option[Category])] = Await.result(itemsManager ? GetItem(itemId), REQUEST_TIME) match {
-        case item: Item =>
-          if (item.categoryId == 0 )
-            Some(Some(item), None)
-          else {
-            val category: Option[Category] = Await.result(catManager ? GetCategory(item.categoryId), REQUEST_TIME) match {
-              case cat: Category => Some(cat)
-              case _ => None
-            }
-            if( category.isDefined) {
-              Some(Some(item), category)
-            }else
-            Some(Some(item), None)
+    case PersistEvent(userId, itemId, eventType) if state.users.contains(userId) && !state.disabledUsers.contains(userId)=> //Todo: Errors
+        Future { sender()}.andThen {
+        case Success(vale) =>
+          val senderRef = vale
+          (itemsManager ? GetItem(itemId)).andThen {
+            case Success(value) =>
+              val itemValue = value.asInstanceOf[Item]
+              if (itemValue.categoryId == 0) {
+                eventType match {
+                  case "view" =>
+                    (state.users(userId) ? AddView(itemValue, Category(0,""))).pipeTo(senderRef)
+                  case "cart" =>
+                    (state.users(userId) ? AddCart(itemValue,  Category(0,""))).pipeTo(senderRef)
+                  case "purchase" =>
+                    (state.users(userId) ? AddPurchase(itemValue,  Category(0,""))).pipeTo(senderRef)
+                }
+              }else{
+                (catManager ? GetCategory(itemValue.categoryId)).andThen {
+                  case Success(finalValue) =>
+                    val catValue = finalValue.asInstanceOf[Category]
+                    eventType match {
+                      case "view" =>
+                        (state.users(userId) ? AddView(itemValue, catValue)).pipeTo(senderRef)
+                      case "cart" =>
+                        (state.users(userId) ? AddCart(itemValue, catValue)).pipeTo(senderRef)
+                      case "purchase" =>
+                        (state.users(userId) ? AddPurchase(itemValue, catValue)).pipeTo(senderRef)
+                    }
+                }
+              }
+            case Failure(exception) =>
+              senderRef ! exception
           }
-        case _ => None
-      }
-      val info:(Option[Item],Option[Category]) = infoToAdd.getOrElse(None,None)
-      if (info._1.isDefined) {
-        val item = info._1.get
-        val cat = info._2.getOrElse(Category(0, ""))
-        if (eventType.equals("view")) state.users(userId) forward AddView(item, cat)
-        if (eventType.equals("purchase")) state.users(userId) forward AddPurchase(item, cat)
-        if (eventType.equals("cart")) state.users(userId) forward AddCart(item, cat)
-      }else {
-        sender() ! s"Item not found" //Todo Handle failure
       }
     case BuyCart(id) if state.users.contains(id) && !state.disabledUsers.contains(id)=>
       state.users(id) forward PurchaseCart
 
       // User Activation / Disabling
     case RemoveUser(id) if state.disabledUsers.contains(id) =>
-      sender() ! s"User already deleted"
+      sender() ! Failure(UserAlreadyDeletedException(s"User already deleted"))
     case ActivateUser(id) if !state.disabledUsers.contains(id) =>
       sender() ! s"User already active"
     case RemoveUser(id) if state.users.contains(id) =>
@@ -129,6 +144,7 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
         isSnapshotTime()
         state.users(id) forward RetrieveInfo
       }
+
     case ActivateUser(id) if state.disabledUsers.contains(id) =>
       persist(UserActivated(id)) {_=>
         state.disabledUsers -= id
@@ -138,9 +154,9 @@ case class UsersManager(itemsManager:ActorRef, catManager:ActorRef) extends Pers
 
     case GetCart(_) | GetViews(_) | GetPurchases(_) | GetUser(_) | UpdateUser(_) |
          BuyCart(_) |  PersistEvent(_,_,_) | RemoveUser(_) | ActivateUser(_) =>
-      sender() ! s"User not Found" //Todo Failure
+      sender() ! Failure(UserNotFoundException(s"User not Found"))
     case CreateUser(User(id, _, _)) if state.users.contains(id) =>
-      sender() ! s"User already registered with id: $id" //Todo: Failure
+      sender() ! Failure(UserAlreadyRegisteredException(s"User already registered with id: $id"))
 
     //Snapshot commands
     case SaveSnapshotSuccess(metadata) =>

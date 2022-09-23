@@ -3,29 +3,39 @@ package com.applaudostudios.store.domain.items
 import com.applaudostudios.store.domain._
 import akka.actor.{ActorContext, ActorLogging, ActorRef, Props}
 import akka.pattern.ask
+import akka.pattern.pipe
 import akka.persistence.{PersistentActor, RecoveryCompleted, SaveSnapshotFailure, SaveSnapshotSuccess, SnapshotOffer}
-import com.applaudostudios.store.domain.categories.CategoriesManager.GetCategory
-import com.applaudostudios.store.domain.data.{Category, Item}
+import com.applaudostudios.store.domain.categories.CategoriesManager.VerifyCategory
+import com.applaudostudios.store.domain.data.Item
 import com.applaudostudios.store.domain.manager.EcommerceManager.{FinishBulkPersistence, InitBulkPersistence}
-import com.applaudostudios.store.domain.items.ItemActor.{AssociateCategory, DeleteCategory, LoadItem, UpdateItem}
+import com.applaudostudios.store.domain.items.ItemActor.{DisableCategory, LoadItem, UpdateItem}
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable
-import scala.concurrent.{Await, Future}
+import scala.concurrent.Future
+import scala.util.{Failure, Success}
 
 object ItemsManager {
   def props(categoryManager:ActorRef):Props = Props(new ItemsManager(categoryManager))
+
   //Commands
   case object GetItems
   case class GetItem(id:Int)
   case class CreateItem(item:Item)
-  case class AddCategory(itemId:Int, catId:BigInt)
   case class RemoveItem(id:Int)
   case class CategoryRemoved(id:BigInt)
+  case class SecureCreate(item:Item)
 
   //Events
   case class ItemCreated(item: Item)
   case class ItemDisabled(id:Int)
+
+  //Exceptions
+  case class ItemCreationException(msg:String) extends RuntimeException(msg)
+  case class ItemUpdateException(msg:String) extends RuntimeException(msg)
+  case class ItemAlreadyDeletedException(msg:String) extends RuntimeException(msg)
+  case class ItemNotFoundException(msg:String) extends RuntimeException(msg)
+
 
   case class ItemsManagerState(items: mutable.Map[Int, ActorRef] = mutable.HashMap[Int, ActorRef](),
                                disabledItems:mutable.Set[Int] = mutable.HashSet[Int]() ){
@@ -44,9 +54,12 @@ object ItemsManager {
 
 
 case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with ActorLogging {
+
   import ItemsManager._
+
   var state: ItemsManagerState = ItemsManagerState()
-  var operationsCount:Int = 0
+  var operationsCount: Int = 0
+
   override def persistenceId: String = "Items-Manager-Actor"
 
 
@@ -55,64 +68,63 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
       context.become(loadBulkData)
     case GetItems =>
       sender() ! Future.sequence(state.items.values.map(_ ? RetrieveInfo))
-    case GetItem(id) if state.items.contains(id) && !state.disabledItems.contains(id)=>
+    case GetItem(id) if state.items.contains(id) && !state.disabledItems.contains(id) =>
       state.items(id).forward(RetrieveInfo)
-    case CreateItem(Item(id,_,_,_)) if state.items.contains(id) =>
-      sender() ! s"Item already registered"  //Todo: Generate Appropriate Failure BadRequest
-    case CreateItem(item @ Item(id,_,cat,_)) if cat==0 =>
+    case CreateItem(Item(id, _, _, _)) if state.items.contains(id) =>
+      sender() ! Failure(ItemCreationException(s"Item already registered"))
+    case CreateItem(item @ Item(id, _, cat, _)) if cat == 0 =>
       persist(ItemCreated(item)) { _ =>
         val itemActor = context.actorOf(ItemActor.props(id, self), s"ItemActor-$id")
+        state.items.addOne(id -> itemActor)
         itemActor forward LoadItem(item)
-        state.items.addOne(id->itemActor)
         isSnapshotTime()
       }
     case CreateItem(item @ Item(id, _, catId, _))  =>
-      val category: Option[Any] = Await.result( categoryManager ? GetCategory(catId), REQUEST_TIME ) match {
-        case cat: Category => Some(cat)
-        case _ => None
-      }
-      if(category.isDefined)
-        persist(ItemCreated(item)) { _ =>
-          val itemActor = context.actorOf(ItemActor.props(id, self), s"ItemActor-$id")
-          itemActor forward LoadItem(item)
-          state.items.addOne(id -> itemActor)
-          isSnapshotTime()
-        }
-      else
-        sender() ! s"Item failed to create. The category associated with it is not registered" //todo: Failure bad request
+      (categoryManager ? VerifyCategory(catId, sender())).onComplete {
+        case Success(tuple) =>
+          val (isValid, senderRef): (Boolean,ActorRef ) = tuple.asInstanceOf[(Boolean, ActorRef)]
+          if(isValid){
+            val itemActor = context.actorOf(ItemActor.props(id, self), s"ItemActor-$id")
+            (itemActor ? LoadItem(item)).pipeTo(senderRef)
+            persist(ItemCreated(item)) { _ =>
+              state.items.addOne(id -> itemActor)
+              isSnapshotTime()
+            }
+          }else{
+            senderRef ! Failure(ItemCreationException("Item failed to create. The category associated with it is not registered"))
+          }
+        case Failure(exception) => throw exception
+       }
+
     case UpdateItem(item @ Item(id,_,catId,_)) if state.items.contains(id) && !state.disabledItems.contains(id) && catId == 0 =>
       state.items(id) forward UpdateItem(item)
-    case UpdateItem(item @ Item(id,_,catId,_)) if state.items.contains(id) && !state.disabledItems.contains(id)=>
-      val category: Option[Category] = Await.result(categoryManager ? GetCategory(catId), REQUEST_TIME) match {
-        case cat:Category => Some(cat)
-        case _ => None
+
+    case UpdateItem(item @ Item(id,_,catId,_)) if state.items.contains(id) && !state.disabledItems.contains(id) =>
+      (categoryManager ? VerifyCategory(catId, sender())).onComplete {
+        case Success(tuple) =>
+          val (isValid, senderRef): (Boolean, ActorRef) = tuple.asInstanceOf[(Boolean, ActorRef)]
+          if (isValid) {
+              (state.items(id) ? UpdateItem(item)).pipeTo(senderRef)
+          } else {
+            senderRef ! Failure(ItemUpdateException("Item failed to update. The category associated with it is not registered"))
+          }
+        case Failure(exception) => throw exception
       }
-      if( category.isDefined)
-        state.items(id) forward UpdateItem(item)
-      else
-        sender() ! s"Item failed to update. The category associated with it is not registered" //todo: Failure bad request
+
     case CategoryRemoved(id) =>
       state.items.values.map { actor =>
-        actor ! DeleteCategory(id)
+        actor ! DisableCategory(id)
       }
     case RemoveItem(id) if state.disabledItems.contains(id) =>
-      sender() ! s"Item already deleted"
+      sender() ! Failure(ItemAlreadyDeletedException(s"Item already deleted"))
     case RemoveItem(id) if state.items.contains(id) =>
       persist(ItemDisabled(id)) { _ =>
         state.disabledItems.addOne(id)
         isSnapshotTime()
         state.items(id) forward RetrieveInfo
       }
-    case AddCategory(itemId, catId) if state.items.contains(itemId) && !state.disabledItems.contains(itemId) =>
-      val category:Option[Category] = Await.result(categoryManager ? GetCategory(catId), REQUEST_TIME) match {
-        case cat: Category => Some(cat)
-        case _ => None
-      }
-      if(category.isDefined)
-        state.items(itemId) forward AssociateCategory(catId)
-      else sender() ! s"The category is not defined"
-    case UpdateItem(_) | GetItem(_) | AddCategory(_,_) | RemoveItem(_) =>
-      sender() ! s"Item not found" //Todo: generate Appropriate Failure NotFound
+    case UpdateItem(_) | GetItem(_) | RemoveItem(_) =>
+      sender() ! Failure(ItemNotFoundException(s"Item not found"))
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
     case SaveSnapshotFailure(metadata, reason) =>

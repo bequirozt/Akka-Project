@@ -37,13 +37,11 @@ case class CategoryActor(id:BigInt,manager:ActorRef) extends PersistentActor wit
       }
     case RetrieveInfo =>
       sender() ! Category(id,state.code)
-    case UpdateCategory(cat) if !state.code.equals(cat.code) =>
+    case UpdateCategory(cat) =>
       persist(CategoryUpdated(cat)) { _ =>
         loadInfo(cat)
         sender() ! Category(state.id, state.code)
       }
-    case UpdateCategory(_) =>
-      sender() ! s"The category was already up to date" //Todo Failure
   }
 
   override def receiveRecover: Receive = {

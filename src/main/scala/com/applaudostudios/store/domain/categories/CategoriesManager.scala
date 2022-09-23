@@ -13,6 +13,7 @@ import com.applaudostudios.store.domain.manager.EcommerceManager.{FinishBulkPers
 
 import scala.collection.mutable
 import scala.concurrent.Future
+import scala.util.Failure
 
 object CategoriesManager{
   def props():Props = Props(CategoriesManager())
@@ -22,10 +23,19 @@ object CategoriesManager{
   case class CreateCategory(category:Category)
   case class UpdateCategory(category: Category)
   case class RemoveCategory(id:BigInt, replyTo:ActorRef)
-
+  case class VerifyCategory(catId:BigInt, ref:ActorRef)
+  case class SetItemsManager(itemsManager:ActorRef)
   //Events
   case class CategoryCreated(category:Category)
   case class CategoryDisabled(id:BigInt)
+
+  //Failures
+  case class CategoryNotFoundException(msg:String) extends RuntimeException(msg)
+  case class CategoryAlreadyRegisteredException(msg:String) extends RuntimeException(msg)
+  case class CategoryAlreadyDeletedException(msg:String) extends RuntimeException(msg)
+  case class CategoryAlreadyUpToDateException(msg:String) extends RuntimeException(msg)
+
+
   //State
   case class CategoriesManagerState(categories: mutable.Map[BigInt, ActorRef]= mutable.HashMap[BigInt,ActorRef](),
                                     disabledCategories:mutable.Set[BigInt] = mutable.HashSet[BigInt]()
@@ -45,11 +55,12 @@ object CategoriesManager{
 case class CategoriesManager() extends PersistentActor with ActorLogging{
   import CategoriesManager._
   override def persistenceId: String = "Categories-Manager-Actor"
-
   var state:CategoriesManagerState = CategoriesManagerState()
   var operationsCount:Int = 0
 
   override def receiveCommand: Receive = {
+    case VerifyCategory(catId, ref)  =>
+      sender() ! (state.categories.contains(catId) && !state.disabledCategories.contains(catId), ref)
     case InitBulkPersistence =>
       context.become(loadBulkData)
     case GetCategories =>
@@ -67,7 +78,7 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
       state.categories(id) forward RetrieveInfo
 
     case RemoveCategory(id, _) if state.disabledCategories.contains(id) =>
-      sender() ! s"Category already deleted"
+      sender() ! Failure(CategoryAlreadyDeletedException("Category already deleted"))
     case RemoveCategory(id, itemsManager) if state.categories.contains(id) =>
       persist(CategoryDisabled(id)) { _ =>
         state.disabledCategories.addOne(id)
@@ -76,9 +87,9 @@ case class CategoriesManager() extends PersistentActor with ActorLogging{
         state.categories(id) forward RetrieveInfo
       }
     case GetCategory(_) | UpdateCategory(_) | RemoveCategory(_,_) =>
-      sender() ! s"Category not found" //Todo failure NF
+        sender() ! Failure(CategoryNotFoundException("Category not found"))
     case CreateCategory(_) =>
-      sender() ! "Category already registered" //TODO Failure Bad Req
+      sender() ! Failure(CategoryAlreadyRegisteredException("Category already registered"))
 
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")

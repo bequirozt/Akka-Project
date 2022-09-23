@@ -84,12 +84,12 @@ The dataset has 9 columns with the following information:
     
 ```
 ##### Todo:
--[ ] Modify Await.result implementation in the managers. It can provoke thread starvation and it's not a
- good approach at all. I must check [this documentation](https://doc.akka.io/docs/akka/2.5.32/futures.html)
-- [ ] Review the View/Cart/Purchase definition and hashCode & equals implementation. Check [equals consistency](https://www.baeldung.com/java-equals-hashcode-contracts) 
+-[x] Modify Await.result implementation in the managers. It can provoke thread starvation and it's not a
+ good approach at all. I must check [this documentation](https://doc.akka.io/docs/akka/2.5.32/futures.html) (I still have some issues)
+- [x] Review the View/Cart/Purchase definition and hashCode & equals implementation. Check [equals consistency](https://www.baeldung.com/java-equals-hashcode-contracts) 
    and how does the [HashSet works](https://docs.oracle.com/javase/7/docs/api/java/util/HashSet.html)
    (Those links refers to Java docs, but it's kinda the same for scala)
 - [ ]  I can change the "operationsCount" with the LastSequenceNumber (More in depth search required, I've just found references about 
  [Recovery](https://doc.akka.io/japi/akka/current/akka/persistence/PersistenceRecovery.html#recovery()) and [Sequence](https://doc.akka.io/japi/akka/current/akka/persistence/query/Sequence.html))
-- [ ] Implement appropriate Failures in the Actor's companion objects. String-like failures are not an option, those
+- [x] Implement appropriate Failures in the Actor's companion objects. String-like failures are not an option, those
  messages must be typed and clearly defined.

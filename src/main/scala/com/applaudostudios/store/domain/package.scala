@@ -43,8 +43,9 @@ package object domain {
                   price: Double,
                   userId: Long,
                   userSession: String) extends EventsPersistedByUser {
+
     override def equals(obj: Any): Boolean = obj match {
-      case Cart(time, _, _,_, _, _, _, _, _) => time != eventTime
+      case Cart(time, _, _,_, _, _, _, uId, session) => time == eventTime && uId.equals(userId) && session.equals(userSession)
       case _ => false
     }
     override def hashCode(): Int = (userId + userSession + eventTime).hashCode()
@@ -62,7 +63,7 @@ package object domain {
                   userId: Long,
                   userSession: String) extends EventsPersistedByUser {
     override def equals(obj: Any): Boolean = obj match {
-      case View(time, _, _, _,_, _, _, _, _) => time != eventTime
+      case View(time, _, _, _,_, _, _, uId, session) => time == eventTime && uId.equals(userId) && session.equals(userSession)
       case _ => false
     }
     override def hashCode(): Int = (userId + userSession + eventTime).hashCode()
@@ -77,7 +78,7 @@ package object domain {
                       userId: Long,
                       userSession: String) extends EventsPersistedByUser {
     override def equals(obj: Any): Boolean = obj match {
-      case Purchase(time, _, _,_, _, _, _, _, `userSession`) => time != eventTime
+      case Purchase(time, _, _,_, _, _, _, uId, session) => time == eventTime && uId.equals(userId) && session.equals(userSession)
       case _ => false
     }
     override def hashCode(): Int = (userId + userSession + eventTime).hashCode()
