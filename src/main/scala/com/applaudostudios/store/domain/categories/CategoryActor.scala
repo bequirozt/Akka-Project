@@ -15,18 +15,17 @@ object CategoryActor {
   case class CategoryCreated(cat:Category)
   case class CategoryUpdated(cat:Category)
 
-  case class CategoryState(id:BigInt,var code:String ="")
+  case class CategoryState(id:BigInt, code:String ="")
 }
 
 case class CategoryActor(id:BigInt,manager:ActorRef) extends PersistentActor with ActorLogging{
   import CategoryActor._
   override def persistenceId: String = s"Category-$id"
 
-  val state: CategoryState = CategoryState(id)
+  var state: CategoryState = CategoryState(id)
 
   def loadInfo(cat: Category): Unit = {
-    val Category(_, code) = cat
-    state.code = code
+    state = state.copy(code = cat.code)
   }
 
   override def receiveCommand: Receive = {
@@ -36,11 +35,11 @@ case class CategoryActor(id:BigInt,manager:ActorRef) extends PersistentActor wit
         sender ! Category(state.id, state.code)
       }
     case RetrieveInfo =>
-      sender() ! Category(id,state.code)
+      sender() ! Category(state.id, state.code)
     case UpdateCategory(cat) =>
-      persist(CategoryUpdated(cat)) { _ =>
-        loadInfo(cat)
-        sender() ! Category(state.id, state.code)
+      persist(CategoryUpdated(cat)) { evt =>
+        loadInfo(evt.cat)
+        sender ! Category(state.id, state.code)
       }
   }
 

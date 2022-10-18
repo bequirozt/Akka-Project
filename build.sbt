@@ -41,6 +41,9 @@ libraryDependencies ++= Seq(
   "com.google.guava" % "guava" % "31.1-jre",
 
   // Google Protocol Buffers
-  "com.google.protobuf" % "protobuf-java" % "3.21.5"
-  ,
+  "com.google.protobuf" % "protobuf-java" % "3.21.5",
+
+  // Testing
+  "org.scalatest" %% "scalatest" % "3.2.14" % "test",
+  "com.typesafe.akka" %% "akka-testkit" % AkkaVersion % Test
 )
