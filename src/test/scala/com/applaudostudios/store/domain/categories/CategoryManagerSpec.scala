@@ -1,7 +1,7 @@
 package com.applaudostudios.store.domain.categories
 
-import scala.concurrent.Future
-import scala.util.{Failure, Success}
+import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.util.Failure
 
 import akka.actor.ActorSystem
 import akka.testkit.{ImplicitSender, TestKit}
@@ -127,9 +127,6 @@ class CategoryManagerSpec
       Given("a category manager actor whit a category information and a new category")
       val categoryId = 7
       val categoryManagerActor = system.actorOf(CategoriesManager.props())
-      val category = Category(categoryId, "c-000007")
-  /*    categoryManagerActor ! CreateCategory(category)
-      expectMsg(category)*/
 
       When("a VerifyCategory request is send")
       categoryManagerActor ! VerifyCategory(categoryId, categoryManagerActor)
@@ -141,10 +138,10 @@ class CategoryManagerSpec
     Scenario("External actor request the existence of a category already deleted") {
 
       Given("a category manager actor whit a category information and a new category")
-      val categoryId = 5
+      val categoryId = 100
       val categoryManagerActor = system.actorOf(CategoriesManager.props())
       val itemsManagerActor = system.actorOf(ItemsManager.props(categoryManagerActor))
-      val category = Category(categoryId, "c-000005")
+      val category = Category(categoryId, "c-00000100")
       categoryManagerActor ! CreateCategory(category)
       expectMsg(category)
       categoryManagerActor ! RemoveCategory(categoryId, itemsManagerActor)
@@ -165,7 +162,7 @@ class CategoryManagerSpec
       val categoryManagerActor = system.actorOf(CategoriesManager.props())
       val category = Category(categoryId, "c-000001")
       val category2 = Category(categoryId2, "c-000002")
-      implicit val executionContext = system.dispatcher
+      implicit val executionContext: ExecutionContextExecutor = system.dispatcher
       categoryManagerActor ! CreateCategory(category)
       expectMsg(category)
       categoryManagerActor ! CreateCategory(category2)

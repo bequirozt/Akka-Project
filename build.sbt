@@ -45,5 +45,8 @@ libraryDependencies ++= Seq(
 
   // Testing
   "org.scalatest" %% "scalatest" % "3.2.14" % "test",
-  "com.typesafe.akka" %% "akka-testkit" % AkkaVersion % Test
+  "com.typesafe.akka" %% "akka-testkit" % AkkaVersion % Test,
+
+  // Coverage
+  //"org.scoverage" % "sbt-scoverage_2.12_1.0" % "2.12"
 )

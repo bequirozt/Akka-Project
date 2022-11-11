@@ -88,6 +88,7 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
             persist(ItemCreated(item)) { _ =>
               state.items.addOne(id -> itemActor)
               isSnapshotTime()
+              log.info("Item created with a category")
             }
           }else{
             senderRef ! Failure(ItemCreationException("Item failed to create. The category associated with it is not registered"))
@@ -123,6 +124,7 @@ case class ItemsManager(categoryManager:ActorRef) extends PersistentActor with A
         state.items(id) forward RetrieveInfo
       }
     case UpdateItem(_) | GetItem(_) | RemoveItem(_) =>
+      log.info("Item not found")
       sender() ! Failure(ItemNotFoundException(s"Item not found"))
     case SaveSnapshotSuccess(metadata) =>
       log.info(s"Saving snapshot succeeded: ${metadata.persistenceId} - ${metadata.timestamp}")
